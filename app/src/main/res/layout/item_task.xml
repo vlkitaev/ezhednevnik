@@ -1,31 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wrap"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
+    android:layout_height="wrap_content">
 
-    <CheckBox
-        android:id="@+id/cbDone"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content" />
-
-    <TextView
-        android:id="@+id/tvText"
-        android:layout_width="0dp"
+    <LinearLayout
+        android:id="@+id/card"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:textSize="16sp"
-        android:paddingStart="4dp"
-        android:paddingEnd="4dp" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/card">
 
-    <Button
-        android:id="@+id/btnDel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:minWidth="44dp"
-        android:text="✕" />
+        <CheckBox
+            android:id="@+id/cbDone"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:buttonTint="@color/accent" />
 
-</LinearLayout>
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
+            android:paddingLeft="2dp"
+            android:paddingRight="6dp">
+
+            <TextView
+                android:id="@+id/tvText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="16sp"
+                android:textColor="@color/text" />
+
+            <TextView
+                android:id="@+id/tvFrom"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingTop="2dp"
+                android:textSize="11sp"
+                android:textColor="@color/muted"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="@color/muted"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnExpand"
+            style="@android:style/Widget.Material.Button.Borderless"
+            android:layout_width="38dp"
+            android:layout_height="42dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:textSize="13sp"
+            android:textColor="@color/muted"
+            android:visibility="gone"
+            android:text="▼" />
+
+        <Button
+            android:id="@+id/btnMenu"
+            style="@android:style/Widget.Material.Button.Borderless"
+            android:layout_width="38dp"
+            android:layout_height="42dp"
+            android:minWidth="0dp"
+            android:padding="0dp"
+            android:textSize="17sp"
+            android:textColor="@color/muted"
+            android:text="⋮" />
+    </LinearLayout>
+</FrameLayout>
