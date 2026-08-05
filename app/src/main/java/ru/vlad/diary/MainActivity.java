@@ -3,6 +3,7 @@ package ru.vlad.diary;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.app.TimePickerDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -33,8 +34,10 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Date;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 public class MainActivity extends Activity {
 
@@ -44,6 +47,8 @@ public class MainActivity extends Activity {
     private final SimpleDateFormat keyFmt = new SimpleDateFormat("yyyy-MM-dd", RU);
     private final SimpleDateFormat dateFmt = new SimpleDateFormat("d MMMM", RU);
     private final SimpleDateFormat dowFmt = new SimpleDateFormat("EEEE, yyyy", RU);
+    private final SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm", RU);
+    private final SimpleDateFormat fullFmt = new SimpleDateFormat("d MMMM, HH:mm", RU);
 
     private final Calendar day = Calendar.getInstance();
     private final List<Task> tasks = new ArrayList<>();
@@ -60,8 +65,10 @@ public class MainActivity extends Activity {
 
     /** Пункт дня. Может содержать подпункты. */
     static class Task {
+        String uid = UUID.randomUUID().toString().substring(0, 8);
         String text;
         boolean done;
+        long remind;
         boolean expanded;
         String from;
         List<Sub> subs = new ArrayList<>();
@@ -113,11 +120,37 @@ public class MainActivity extends Activity {
         });
         ((ImageButton) findViewById(R.id.btnVoice)).setOnClickListener(v -> startVoice());
 
+        Reminders.ensureChannel(this);
+        handleIntent(getIntent());
+
         lastToday = todayKey();
         int moved = autoCarry();
         load();
         if (moved > 0) {
             Toast.makeText(this, "Перенесено с прошлых дней: " + moved, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+        load();
+    }
+
+    /** Открытие по нажатию на уведомление — сразу на нужную дату. */
+    private void handleIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String key = intent.getStringExtra(Reminders.EXTRA_DAY);
+        if (key != null && key.length() == 10) {
+            try {
+                day.setTime(keyFmt.parse(key));
+            } catch (Exception ignored) {
+                // некорректная дата в уведомлении — остаёмся на сегодня
+            }
         }
     }
 
@@ -166,6 +199,11 @@ public class MainActivity extends Activity {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject o = arr.getJSONObject(i);
                 Task t = new Task();
+                String uid = o.optString("i", "");
+                if (!uid.isEmpty()) {
+                    t.uid = uid;
+                }
+                t.remind = o.optLong("r", 0);
                 t.text = o.optString("t");
                 t.done = o.optBoolean("d", false);
                 t.expanded = o.optBoolean("e", false);
@@ -193,8 +231,12 @@ public class MainActivity extends Activity {
         try {
             for (Task t : src) {
                 JSONObject o = new JSONObject();
+                o.put("i", t.uid);
                 o.put("t", t.text);
                 o.put("d", t.done);
+                if (t.remind > 0) {
+                    o.put("r", t.remind);
+                }
                 o.put("e", t.expanded);
                 if (t.from != null) {
                     o.put("f", t.from);
@@ -267,6 +309,9 @@ public class MainActivity extends Activity {
                 } else {
                     if (t.from == null) {
                         t.from = key;
+                    }
+                    if (t.remind > 0 && t.remind < System.currentTimeMillis()) {
+                        t.remind = 0;
                     }
                     todayList.add(t);
                     moved++;
@@ -385,35 +430,154 @@ public class MainActivity extends Activity {
 
     private void taskMenu(final int index) {
         final Task t = tasks.get(index);
-        String[] items = {"Изменить текст", "Добавить подпункт", "Удалить"};
+        final List<String> items = new ArrayList<>();
+        items.add("Изменить текст");
+        items.add("Добавить подпункт");
+        items.add(t.remind > 0 ? "Изменить напоминание" : "Напомнить\u2026");
+        if (t.remind > 0) {
+            items.add("Убрать напоминание");
+        }
+        items.add("Удалить");
+
         new AlertDialog.Builder(this)
-                .setItems(items, (d, which) -> {
-                    if (which == 0) {
+                .setItems(items.toArray(new String[0]), (d, which) -> {
+                    String choice = items.get(which);
+                    if ("Изменить текст".equals(choice)) {
                         askText("Изменить", t.text, text -> {
                             t.text = text;
                             save();
+                            if (t.remind > System.currentTimeMillis()) {
+                                Reminders.schedule(MainActivity.this, t.uid, t.text, dayKey(), t.remind);
+                            }
                             refresh();
                         });
-                    } else if (which == 1) {
+                    } else if ("Добавить подпункт".equals(choice)) {
                         askText("Новый подпункт", "", text -> {
-                            Sub s = new Sub();
-                            s.text = text;
-                            s.done = false;
-                            t.subs.add(s);
+                            Sub s2 = new Sub();
+                            s2.text = text;
+                            s2.done = false;
+                            t.subs.add(s2);
                             t.expanded = true;
                             save();
                             refresh();
                         });
-                    } else {
+                    } else if ("Убрать напоминание".equals(choice)) {
+                        clearReminder(index);
+                    } else if ("Удалить".equals(choice)) {
                         new AlertDialog.Builder(MainActivity.this)
                                 .setMessage("Удалить «" + t.text + "»?")
                                 .setNegativeButton("Отмена", null)
                                 .setPositiveButton("Удалить", (dd, ww) -> {
+                                    Reminders.cancel(MainActivity.this, t.uid);
                                     tasks.remove(index);
                                     save();
                                     refresh();
                                 })
                                 .show();
+                    } else {
+                        pickReminder(index);
+                    }
+                })
+                .show();
+    }
+
+    // ---------- напоминания ----------
+
+    /** Выбор даты и времени. Если дата другая — пункт переезжает на неё. */
+    private void pickReminder(final int index) {
+        final Task t = tasks.get(index);
+        final Calendar init = Calendar.getInstance();
+        if (t.remind > 0) {
+            init.setTimeInMillis(t.remind);
+        } else {
+            init.setTime(day.getTime());
+            init.set(Calendar.HOUR_OF_DAY, 9);
+            init.set(Calendar.MINUTE, 0);
+        }
+        // стартовая дата не должна быть раньше сегодняшней, иначе DatePicker ругается
+        if (init.getTimeInMillis() < System.currentTimeMillis()) {
+            Calendar now = Calendar.getInstance();
+            init.set(now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH));
+        }
+
+        DatePickerDialog dp = new DatePickerDialog(this, (view, y, m, d) ->
+                new TimePickerDialog(MainActivity.this, (tv, hour, minute) -> {
+                    Calendar at = Calendar.getInstance();
+                    at.set(y, m, d, hour, minute, 0);
+                    at.set(Calendar.MILLISECOND, 0);
+                    applyReminder(index, at);
+                }, init.get(Calendar.HOUR_OF_DAY), init.get(Calendar.MINUTE), true).show(),
+                init.get(Calendar.YEAR), init.get(Calendar.MONTH), init.get(Calendar.DAY_OF_MONTH));
+        dp.getDatePicker().setMinDate(System.currentTimeMillis() - 60000);
+        dp.setTitle("Когда напомнить");
+        dp.show();
+    }
+
+    private void applyReminder(int index, Calendar at) {
+        if (index < 0 || index >= tasks.size()) {
+            return;
+        }
+        if (at.getTimeInMillis() <= System.currentTimeMillis()) {
+            Toast.makeText(this, "Это время уже прошло", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Task t = tasks.get(index);
+        String targetKey = keyFmt.format(at.getTime());
+        t.remind = at.getTimeInMillis();
+        t.done = false;
+
+        if (targetKey.equals(dayKey())) {
+            save();
+        } else {
+            tasks.remove(index);
+            save();
+            List<Task> dst = parse(prefs.getString(targetKey, "[]"));
+            dst.add(t);
+            writeDay(targetKey, dst);
+        }
+
+        boolean exact = Reminders.schedule(this, t.uid, t.text, targetKey, t.remind);
+        askNotificationPermission();
+        refresh();
+        Toast.makeText(this, "Напоминание: " + fullFmt.format(at.getTime()),
+                Toast.LENGTH_LONG).show();
+        if (!exact) {
+            offerExactAlarms();
+        }
+    }
+
+    private void clearReminder(int index) {
+        Task t = tasks.get(index);
+        Reminders.cancel(this, t.uid);
+        t.remind = 0;
+        save();
+        refresh();
+    }
+
+    private void askNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 7);
+        }
+    }
+
+    /** Android 12+ может запрещать точные будильники — предлагаем открыть настройку. */
+    private void offerExactAlarms() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setMessage("Система не разрешает точные будильники, напоминание может "
+                        + "прийти с задержкой. Открыть настройку?")
+                .setNegativeButton("Не надо", null)
+                .setPositiveButton("Открыть", (d, w) -> {
+                    try {
+                        Intent i = new Intent("android.settings.REQUEST_SCHEDULE_EXACT_ALARM");
+                        i.setData(android.net.Uri.parse("package:" + getPackageName()));
+                        startActivity(i);
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Настройка недоступна", Toast.LENGTH_SHORT).show();
                     }
                 })
                 .show();
@@ -534,11 +698,18 @@ public class MainActivity extends Activity {
             boolean done = isDone(t);
             strike(tv, done);
 
-            if (t.from == null || done) {
+            List<String> meta = new ArrayList<>();
+            if (t.remind > 0) {
+                meta.add("\u23F0 " + timeFmt.format(new Date(t.remind)));
+            }
+            if (t.from != null && !done) {
+                meta.add(fromLabel(t.from));
+            }
+            if (meta.isEmpty() || done) {
                 from.setVisibility(View.GONE);
             } else {
                 from.setVisibility(View.VISIBLE);
-                from.setText(fromLabel(t.from));
+                from.setText(TextUtils.join(" · ", meta));
             }
 
             if (t.subs.isEmpty()) {
@@ -566,6 +737,13 @@ public class MainActivity extends Activity {
                 t.done = checked;
                 for (Sub s : t.subs) {
                     s.done = checked;
+                }
+                if (t.remind > 0) {
+                    if (checked) {
+                        Reminders.cancel(MainActivity.this, t.uid);
+                    } else if (t.remind > System.currentTimeMillis()) {
+                        Reminders.schedule(MainActivity.this, t.uid, t.text, dayKey(), t.remind);
+                    }
                 }
                 save();
                 refresh();
