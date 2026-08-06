@@ -114,6 +114,10 @@ public class MainActivity extends Activity {
         findViewById(R.id.btnAdd).setOnClickListener(v -> addTask());
         tvDate.setOnClickListener(v -> pickDate());
         tvDow.setOnClickListener(v -> pickDate());
+        tvDate.setOnLongClickListener(v -> {
+            showDiagnostics();
+            return true;
+        });
         btnToday.setOnClickListener(v -> {
             day.setTimeInMillis(System.currentTimeMillis());
             load();
@@ -121,6 +125,8 @@ public class MainActivity extends Activity {
         ((ImageButton) findViewById(R.id.btnVoice)).setOnClickListener(v -> startVoice());
 
         Reminders.ensureChannel(this);
+        Reminders.syncAll(this);
+        askNotificationPermission();
         handleIntent(getIntent());
 
         lastToday = todayKey();
@@ -578,6 +584,70 @@ public class MainActivity extends Activity {
                         startActivity(i);
                     } catch (Exception e) {
                         Toast.makeText(this, "Настройка недоступна", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .show();
+    }
+
+    // ---------- диагностика напоминаний ----------
+
+    /** Длинный тап по дате: что именно мешает напоминаниям сработать. */
+    private void showDiagnostics() {
+        android.app.NotificationManager nm =
+                (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        android.app.AlarmManager am =
+                (android.app.AlarmManager) getSystemService(ALARM_SERVICE);
+        android.os.PowerManager pm =
+                (android.os.PowerManager) getSystemService(POWER_SERVICE);
+
+        boolean notifOn = nm != null && nm.areNotificationsEnabled();
+        boolean channelOn = true;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && nm != null) {
+            android.app.NotificationChannel ch = nm.getNotificationChannel(Reminders.CHANNEL);
+            channelOn = ch == null
+                    || ch.getImportance() != android.app.NotificationManager.IMPORTANCE_NONE;
+        }
+        boolean exactOn = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S
+                || (am != null && am.canScheduleExactAlarms());
+        boolean battFree = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+
+        int planned = 0;
+        for (Task t : tasks) {
+            if (t.remind > System.currentTimeMillis()) {
+                planned++;
+            }
+        }
+
+        String msg = "Уведомления: " + (notifOn ? "разрешены" : "ЗАПРЕЩЕНЫ")
+                + "\nКанал «Напоминания»: " + (channelOn ? "включён" : "ВЫКЛЮЧЕН")
+                + "\nТочные будильники: " + (exactOn ? "разрешены" : "ЗАПРЕЩЕНЫ")
+                + "\nЭкономия батареи: " + (battFree ? "снята" : "ВКЛЮЧЕНА")
+                + "\nЗапланировано на этот день: " + planned
+                + "\n\nЕсли всё разрешено, а напоминание не пришло — телефон был выключен "
+                + "или система усыпила приложение.";
+
+        new AlertDialog.Builder(this)
+                .setTitle("Диагностика напоминаний")
+                .setMessage(msg)
+                .setPositiveButton("Тест через 60 сек", (d, w) -> {
+                    long at = System.currentTimeMillis() + 60000;
+                    boolean exact = Reminders.schedule(this, "selftest",
+                            "Тестовое напоминание", dayKey(), at);
+                    Toast.makeText(this, exact ? "Сработает через минуту"
+                            : "Поставлено неточно, возможна задержка", Toast.LENGTH_LONG).show();
+                })
+                .setNeutralButton("Проверить сейчас", (d, w) ->
+                        Reminders.notifyNow(this, "selftest-now",
+                                "Проверка: уведомления доходят", dayKey()))
+                .setNegativeButton("Настройки", (d, w) -> {
+                    try {
+                        Intent i = new Intent(android.provider.Settings
+                                .ACTION_APPLICATION_DETAILS_SETTINGS);
+                        i.setData(android.net.Uri.parse("package:" + getPackageName()));
+                        startActivity(i);
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Не удалось открыть настройки",
+                                Toast.LENGTH_SHORT).show();
                     }
                 })
                 .show();

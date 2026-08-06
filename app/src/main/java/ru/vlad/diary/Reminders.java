@@ -74,10 +74,18 @@ public class Reminders {
         }
     }
 
-    /** Перерегистрирует все будущие напоминания (после перезагрузки телефона). */
-    static void rescheduleAll(Context ctx) {
-        Map<String, ?> all = ctx.getSharedPreferences("diary", Context.MODE_PRIVATE).getAll();
+    /**
+     * Приводит будильники в соответствие с данными: будущие — ставит заново,
+     * просроченные — показывает как пропущенные и гасит, чтобы не повторялись.
+     * Вызывается при запуске приложения и после перезагрузки телефона.
+     */
+    static void syncAll(Context ctx) {
+        android.content.SharedPreferences prefs =
+                ctx.getSharedPreferences("diary", Context.MODE_PRIVATE);
+        Map<String, ?> all = prefs.getAll();
         long now = System.currentTimeMillis();
+        long missedWindow = 7L * 24 * 60 * 60 * 1000;
+
         for (Map.Entry<String, ?> e : all.entrySet()) {
             String key = e.getKey();
             if (key.length() != 10 || !(e.getValue() instanceof String)) {
@@ -85,13 +93,26 @@ public class Reminders {
             }
             try {
                 JSONArray arr = new JSONArray((String) e.getValue());
+                boolean changed = false;
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.getJSONObject(i);
                     long at = o.optLong("r", 0);
                     String uid = o.optString("i", "");
-                    if (at > now && !uid.isEmpty() && !o.optBoolean("d", false)) {
-                        schedule(ctx, uid, o.optString("t"), key, at);
+                    if (at <= 0 || uid.isEmpty() || o.optBoolean("d", false)) {
+                        continue;
                     }
+                    if (at > now) {
+                        schedule(ctx, uid, o.optString("t"), key, at);
+                    } else {
+                        if (now - at < missedWindow) {
+                            notify(ctx, uid, o.optString("t"), key, true);
+                        }
+                        o.put("r", 0);
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    prefs.edit().putString(key, arr.toString()).apply();
                 }
             } catch (Exception ignored) {
                 // повреждённый день пропускаем
@@ -100,6 +121,10 @@ public class Reminders {
     }
 
     static void notifyNow(Context ctx, String uid, String text, String dayKey) {
+        notify(ctx, uid, text, dayKey, false);
+    }
+
+    static void notify(Context ctx, String uid, String text, String dayKey, boolean missed) {
         ensureChannel(ctx);
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) {
@@ -119,7 +144,7 @@ public class Reminders {
             b = new Notification.Builder(ctx);
         }
         b.setSmallIcon(android.R.drawable.ic_popup_reminder)
-                .setContentTitle("Ежедневник")
+                .setContentTitle(missed ? "Пропущенное напоминание" : "Ежедневник")
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setAutoCancel(true)

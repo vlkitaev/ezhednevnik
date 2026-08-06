@@ -12,7 +12,7 @@ public class BootReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || "android.intent.action.QUICKBOOT_POWERON".equals(action)) {
-            Reminders.rescheduleAll(context);
+            Reminders.syncAll(context);
         }
     }
 }
